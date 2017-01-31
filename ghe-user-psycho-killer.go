@@ -7,8 +7,11 @@ import (
   "net/http"
   "encoding/json"
   "regexp"
+  "crypto/tls"
+  "crypto/x509"
+  "io/ioutil"
 )
-
+var CERTIFICATE_PATH = os.Getenv("GHE_CERT")
 var linkListRegex = regexp.MustCompile("<([A-Za-z0-9\\:\\.\\/\\=\\?\\{\\}]*)>; rel=\"([A-Za-z]*)\"")
 
 func main() {
@@ -45,7 +48,24 @@ func main() {
 
   log.Printf("Suspended %d users\n", suspendCounter)
 }
+func buildClient() *http.Client {
+        // Set up our own certificate pool
+        tlsConfig := &tls.Config{RootCAs: x509.NewCertPool()}
+        transport := &http.Transport{TLSClientConfig: tlsConfig}
+        client := &http.Client{Transport: transport}
 
+        // Load our trusted certificate path
+        pemData, err := ioutil.ReadFile(CERTIFICATE_PATH)
+        if err != nil {
+            panic(err)
+        }
+        ok := tlsConfig.RootCAs.AppendCertsFromPEM(pemData)
+        if !ok {
+            panic("Couldn't load PEM data")
+        }
+
+        return client
+}
 func suspend(user User, pat string) {
   var url = fmt.Sprintf("https://%s/api/v3/users/%s/suspended", os.Getenv("GHE_SERVER"), user.Login)
 
@@ -61,7 +81,7 @@ func suspend(user User, pat string) {
   req.Header.Add("Authorization", fmt.Sprintf("token %s", pat))
   req.Header.Add("Content-Length", "0")
 
-  client := &http.Client{}
+  client := buildClient()
 
   resp, doErr := client.Do(req)
   if doErr != nil {
@@ -105,8 +125,7 @@ func getUserList(url, pat string) []User {
   // Provide authentication
   req.Header.Add("Authorization", fmt.Sprintf("token %s", pat))
 
-  client := &http.Client{}
-
+  client := buildClient()
   resp, doErr := client.Do(req)
   if doErr != nil {
     log.Fatal("Failed executing HTTP request: ", doErr)
